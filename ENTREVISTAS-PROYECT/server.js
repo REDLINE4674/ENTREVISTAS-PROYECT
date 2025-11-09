@@ -28,27 +28,67 @@ runMigrations()
 // Configuración de Nodemailer con timeout y opciones alternativas
 let transporter;
 
-// Intentar configurar con Gmail primero
+// Intentar configurar el servicio de correo
 if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
+  
+  // Detectar proveedor por el dominio del correo
+  const emailDomain = process.env.EMAIL_USER.split('@')[1]?.toLowerCase();
+  
+  let emailConfig = {
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
     },
-    connectionTimeout: 10000, // 10 segundos
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-    pool: true, // Usar pool de conexiones
-    maxConnections: 5,
-    maxMessages: 100
-  });
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+    pool: false, // Desactivar pool para evitar problemas de timeout
+    logger: false,
+    debug: false
+  };
+
+  // Configuración según el proveedor
+  if (emailDomain?.includes('gmail')) {
+    // Gmail con configuración SMTP directa (más confiable que 'service')
+    emailConfig.host = 'smtp.gmail.com';
+    emailConfig.port = 587;
+    emailConfig.secure = false;
+    emailConfig.tls = {
+      rejectUnauthorized: false
+    };
+  } else if (emailDomain?.includes('outlook') || emailDomain?.includes('hotmail') || emailDomain?.includes('live')) {
+    // Outlook/Hotmail
+    emailConfig.host = 'smtp.office365.com';
+    emailConfig.port = 587;
+    emailConfig.secure = false;
+    emailConfig.tls = {
+      ciphers: 'SSLv3'
+    };
+  } else if (process.env.SMTP_HOST) {
+    // Servidor SMTP personalizado
+    emailConfig.host = process.env.SMTP_HOST;
+    emailConfig.port = parseInt(process.env.SMTP_PORT) || 587;
+    emailConfig.secure = process.env.SMTP_SECURE === 'true';
+  } else {
+    // Configuración genérica
+    emailConfig.host = `smtp.${emailDomain}`;
+    emailConfig.port = 587;
+    emailConfig.secure = false;
+  }
+
+  transporter = nodemailer.createTransport(emailConfig);
   
-  // Verificar conexión
+  // Verificar conexión (pero no bloquear el inicio del servidor)
   transporter.verify((error, success) => {
     if (error) {
-      console.error('❌ Error al conectar con Gmail:', error.message);
-      console.log('💡 Verifica EMAIL_USER y EMAIL_PASS en las variables de entorno');
+      console.error('❌ Error al conectar con el servidor de correo:', error.message);
+      console.log('📧 Configuración actual:', {
+        host: emailConfig.host,
+        port: emailConfig.port,
+        user: process.env.EMAIL_USER
+      });
+      console.log('⚠️ Los correos NO se enviarán. El sistema seguirá funcionando.');
+      console.log('💡 Verifica que EMAIL_PASS sea la contraseña de aplicación de Gmail (16 caracteres)');
     } else {
       console.log('✅ Servidor de correo listo para enviar mensajes');
     }
