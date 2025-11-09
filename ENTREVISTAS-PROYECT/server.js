@@ -49,12 +49,14 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 
   // Configuración según el proveedor
   if (emailDomain?.includes('gmail')) {
-    // Gmail con configuración SMTP directa (más confiable que 'service')
+    // Gmail con configuración SMTP directa
+    // Intentar primero con puerto 465 (SSL) que suele funcionar mejor en Render
     emailConfig.host = 'smtp.gmail.com';
-    emailConfig.port = 587;
-    emailConfig.secure = false;
+    emailConfig.port = 465;
+    emailConfig.secure = true; // true para puerto 465
     emailConfig.tls = {
-      rejectUnauthorized: false
+      rejectUnauthorized: false,
+      minVersion: 'TLSv1.2'
     };
   } else if (emailDomain?.includes('outlook') || emailDomain?.includes('hotmail') || emailDomain?.includes('live')) {
     // Outlook/Hotmail
