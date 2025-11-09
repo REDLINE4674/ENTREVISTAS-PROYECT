@@ -25,27 +25,37 @@ runMigrations()
   .then(() => console.log('✅ Base de datos inicializada'))
   .catch(error => console.error('❌ Error al inicializar BD:', error));
 
-// Configuración de Nodemailer
+// Configuración de Nodemailer con timeout
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  }
+  },
+  connectionTimeout: 10000, // 10 segundos
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 // Función para enviar correo
 async function enviarCorreo(correo, asunto, contenido) {
   try {
+    // Verificar que las credenciales de email estén configuradas
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.log('⚠️ Credenciales de email no configuradas. Correo no enviado.');
+      return;
+    }
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: correo,
       subject: asunto,
       html: contenido
     });
-    console.log('Correo enviado exitosamente');
+    console.log('✅ Correo enviado exitosamente a:', correo);
   } catch (error) {
-    console.error('Error al enviar correo:', error);
+    console.error('❌ Error al enviar correo:', error.message);
+    // No lanzamos el error para que el proceso continúe
   }
 }
 
@@ -81,7 +91,13 @@ app.post('/api/solicitudes', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Enviar correo de confirmación de recepción
+    // Responder inmediatamente al cliente
+    res.status(201).json({ 
+      message: 'Solicitud creada exitosamente',
+      id_solicitud 
+    });
+
+    // Enviar correo de confirmación de recepción (sin esperar)
     const contenidoCorreo = `
       <h2>Solicitud de Entrevista Recibida</h2>
       <p>Estimado/a ${nombre} ${apellidos},</p>
@@ -94,12 +110,8 @@ app.post('/api/solicitudes', async (req, res) => {
       <p>Saludos cordiales,<br>Equipo de Reclutamiento</p>
     `;
     
-    await enviarCorreo(correo, 'Solicitud de Entrevista Recibida', contenidoCorreo);
-
-    res.status(201).json({ 
-      message: 'Solicitud creada exitosamente',
-      id_solicitud 
-    });
+    enviarCorreo(correo, 'Solicitud de Entrevista Recibida', contenidoCorreo)
+      .catch(err => console.error('Error enviando correo de recepción:', err));
 
   } catch (error) {
     await client.query('ROLLBACK');
@@ -173,7 +185,10 @@ app.put('/api/solicitudes/:id/confirmar', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Enviar correo de confirmación
+    // Responder inmediatamente al cliente
+    res.json({ message: 'Cita confirmada exitosamente' });
+
+    // Enviar correo de forma asíncrona (no bloqueante)
     const contenidoCorreo = `
       <h2 style="color: #667eea;">¡Tu Entrevista ha sido Confirmada!</h2>
       <p>Estimado/a ${aspirante.nombre} ${aspirante.apellidos},</p>
@@ -192,13 +207,12 @@ app.put('/api/solicitudes/:id/confirmar', async (req, res) => {
       <p>Saludos cordiales,<br><strong>Equipo de Reclutamiento</strong></p>
     `;
 
-    await enviarCorreo(
+    // Enviar correo sin esperar (fire and forget)
+    enviarCorreo(
       aspirante.correo,
       '✅ Confirmación de Entrevista',
       contenidoCorreo
-    );
-
-    res.json({ message: 'Cita confirmada y correo enviado' });
+    ).catch(err => console.error('Error enviando correo de confirmación:', err));
 
   } catch (error) {
     await client.query('ROLLBACK');

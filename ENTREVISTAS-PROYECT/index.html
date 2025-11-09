@@ -209,7 +209,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const API_URL = 'https://entrevistas-api.onrender.com/api';
+        const API_URL = 'http://localhost:3000/api';
 
         // Configurar fecha mínima (hoy)
         const today = new Date().toISOString().split('T')[0];
@@ -311,6 +311,10 @@
             const fecha = document.getElementById('modal_fecha_cita').value;
             const hora = document.getElementById('modal_hora_cita').value;
 
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Confirmando...';
+
             try {
                 const response = await fetch(`${API_URL}/solicitudes/${id}/confirmar`, {
                     method: 'PUT',
@@ -320,11 +324,18 @@
 
                 if (response.ok) {
                     bootstrap.Modal.getInstance(document.getElementById('confirmarModal')).hide();
-                    cargarSolicitudes();
-                    alert('Cita confirmada. Se ha enviado un correo al aspirante.');
+                    await cargarSolicitudes();
+                    alert('✅ Cita confirmada exitosamente. Se está enviando el correo al aspirante.');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + (error.error || 'No se pudo confirmar la cita'));
                 }
             } catch (error) {
-                alert('Error al confirmar la cita');
+                console.error('Error:', error);
+                alert('❌ Error de conexión. Por favor intenta de nuevo.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirmar Entrevista';
             }
         }
 
@@ -337,11 +348,15 @@
                 });
 
                 if (response.ok) {
-                    cargarSolicitudes();
-                    alert('Solicitud rechazada');
+                    await cargarSolicitudes();
+                    alert('✅ Solicitud rechazada exitosamente');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + (error.error || 'No se pudo rechazar la solicitud'));
                 }
             } catch (error) {
-                alert('Error al rechazar la solicitud');
+                console.error('Error:', error);
+                alert('❌ Error de conexión. Por favor intenta de nuevo.');
             }
         }
 
@@ -357,5 +372,4 @@
         document.getElementById('dashboard-tab').addEventListener('shown.bs.tab', cargarSolicitudes);
     </script>
 </body>
-
 </html>
