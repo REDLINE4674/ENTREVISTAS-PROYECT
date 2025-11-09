@@ -25,17 +25,37 @@ runMigrations()
   .then(() => console.log('✅ Base de datos inicializada'))
   .catch(error => console.error('❌ Error al inicializar BD:', error));
 
-// Configuración de Nodemailer con timeout
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  connectionTimeout: 10000, // 10 segundos
-  greetingTimeout: 10000,
-  socketTimeout: 10000
-});
+// Configuración de Nodemailer con timeout y opciones alternativas
+let transporter;
+
+// Intentar configurar con Gmail primero
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    connectionTimeout: 10000, // 10 segundos
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
+    pool: true, // Usar pool de conexiones
+    maxConnections: 5,
+    maxMessages: 100
+  });
+  
+  // Verificar conexión
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('❌ Error al conectar con Gmail:', error.message);
+      console.log('💡 Verifica EMAIL_USER y EMAIL_PASS en las variables de entorno');
+    } else {
+      console.log('✅ Servidor de correo listo para enviar mensajes');
+    }
+  });
+} else {
+  console.log('⚠️ Variables EMAIL_USER o EMAIL_PASS no configuradas. Los correos no se enviarán.');
+}
 
 // Función para enviar correo
 async function enviarCorreo(correo, asunto, contenido) {
