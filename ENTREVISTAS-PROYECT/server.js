@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { runMigrations } = require('./migrations');
 require('dotenv').config();
 
@@ -25,13 +26,23 @@ runMigrations()
   .then(() => console.log('✅ Base de datos inicializada'))
   .catch(error => console.error('❌ Error al inicializar BD:', error));
 
-// Configuración de Nodemailer con timeout y opciones alternativas
-let transporter;
+// Configuración de servicio de correo
+let emailService = null;
+let emailServiceType = 'none';
 
-// Intentar configurar el servicio de correo
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  
-  // Detectar proveedor por el dominio del correo
+// Intentar configurar Resend primero (preferido para Render)
+if (process.env.RESEND_API_KEY) {
+  try {
+    emailService = new Resend(process.env.RESEND_API_KEY);
+    emailServiceType = 'resend';
+    console.log('✅ Servicio de correo configurado: Resend');
+  } catch (error) {
+    console.error('❌ Error al configurar Resend:', error.message);
+  }
+}
+
+// Si no hay Resend, intentar con Nodemailer/Gmail
+if (!emailService && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   const emailDomain = process.env.EMAIL_USER.split('@')[1]?.toLowerCase();
   
   let emailConfig = {
@@ -42,24 +53,20 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 15000,
-    pool: false, // Desactivar pool para evitar problemas de timeout
+    pool: false,
     logger: false,
     debug: false
   };
 
-  // Configuración según el proveedor
   if (emailDomain?.includes('gmail')) {
-    // Gmail con configuración SMTP directa
-    // Intentar primero con puerto 465 (SSL) que suele funcionar mejor en Render
     emailConfig.host = 'smtp.gmail.com';
     emailConfig.port = 465;
-    emailConfig.secure = true; // true para puerto 465
+    emailConfig.secure = true;
     emailConfig.tls = {
       rejectUnauthorized: false,
       minVersion: 'TLSv1.2'
     };
   } else if (emailDomain?.includes('outlook') || emailDomain?.includes('hotmail') || emailDomain?.includes('live')) {
-    // Outlook/Hotmail
     emailConfig.host = 'smtp.office365.com';
     emailConfig.port = 587;
     emailConfig.secure = false;
@@ -67,57 +74,72 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
       ciphers: 'SSLv3'
     };
   } else if (process.env.SMTP_HOST) {
-    // Servidor SMTP personalizado
     emailConfig.host = process.env.SMTP_HOST;
     emailConfig.port = parseInt(process.env.SMTP_PORT) || 587;
     emailConfig.secure = process.env.SMTP_SECURE === 'true';
   } else {
-    // Configuración genérica
     emailConfig.host = `smtp.${emailDomain}`;
     emailConfig.port = 587;
     emailConfig.secure = false;
   }
 
-  transporter = nodemailer.createTransport(emailConfig);
+  emailService = nodemailer.createTransport(emailConfig);
+  emailServiceType = 'smtp';
   
-  // Verificar conexión (pero no bloquear el inicio del servidor)
-  transporter.verify((error, success) => {
+  emailService.verify((error, success) => {
     if (error) {
-      console.error('❌ Error al conectar con el servidor de correo:', error.message);
-      console.log('📧 Configuración actual:', {
+      console.error('❌ Error al conectar con SMTP:', error.message);
+      console.log('📧 Configuración:', {
         host: emailConfig.host,
         port: emailConfig.port,
         user: process.env.EMAIL_USER
       });
-      console.log('⚠️ Los correos NO se enviarán. El sistema seguirá funcionando.');
-      console.log('💡 Verifica que EMAIL_PASS sea la contraseña de aplicación de Gmail (16 caracteres)');
+      console.log('⚠️ Los correos NO se enviarán.');
+      console.log('💡 Considera usar Resend: https://resend.com (gratis, 3000 correos/mes)');
+      emailService = null;
+      emailServiceType = 'none';
     } else {
-      console.log('✅ Servidor de correo listo para enviar mensajes');
+      console.log('✅ Servidor de correo SMTP listo');
     }
   });
-} else {
-  console.log('⚠️ Variables EMAIL_USER o EMAIL_PASS no configuradas. Los correos no se enviarán.');
 }
 
-// Función para enviar correo
+if (!emailService) {
+  console.log('⚠️ Servicio de correo NO configurado. Los correos no se enviarán.');
+  console.log('💡 Para habilitar correos:');
+  console.log('   - Opción 1 (Recomendado): Agregar RESEND_API_KEY');
+  console.log('   - Opción 2: Configurar EMAIL_USER y EMAIL_PASS');
+}
+
+// Función para enviar correo (soporta Resend y SMTP)
 async function enviarCorreo(correo, asunto, contenido) {
   try {
-    // Verificar que las credenciales de email estén configuradas
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.log('⚠️ Credenciales de email no configuradas. Correo no enviado.');
+    if (!emailService) {
+      console.log('⚠️ Servicio de correo no configurado. Correo no enviado.');
       return;
     }
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: correo,
-      subject: asunto,
-      html: contenido
-    });
-    console.log('✅ Correo enviado exitosamente a:', correo);
+    if (emailServiceType === 'resend') {
+      // Usar Resend
+      await emailService.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
+        to: correo,
+        subject: asunto,
+        html: contenido
+      });
+      console.log('✅ Correo enviado exitosamente a:', correo, '(vía Resend)');
+    } else if (emailServiceType === 'smtp') {
+      // Usar SMTP (Gmail, etc.)
+      await emailService.sendMail({
+        from: process.env.EMAIL_USER,
+        to: correo,
+        subject: asunto,
+        html: contenido
+      });
+      console.log('✅ Correo enviado exitosamente a:', correo, '(vía SMTP)');
+    }
   } catch (error) {
     console.error('❌ Error al enviar correo:', error.message);
-    // No lanzamos el error para que el proceso continúe
   }
 }
 

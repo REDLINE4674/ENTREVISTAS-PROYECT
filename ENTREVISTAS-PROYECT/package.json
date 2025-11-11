@@ -21,7 +21,8 @@
     "cors": "^2.8.5",
     "pg": "^8.11.3",
     "nodemailer": "^6.9.7",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "resend": "^3.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
